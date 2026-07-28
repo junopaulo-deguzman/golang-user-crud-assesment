@@ -1,24 +1,30 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"golang-user-crud-assesment/internal/model"
-	"golang-user-crud-assesment/internal/repository"
-	"golang-user-crud-assesment/internal/response"
 	"io"
 	"log"
 	"net/http"
 	"net/mail"
 
+	"golang-user-crud-assesment/internal/model"
+	"golang-user-crud-assesment/internal/response"
+
 	"github.com/go-sql-driver/mysql"
 )
 
 type Handler struct {
-	users *repository.UserRepository
+	users UserRepository
 }
 
-func New(users *repository.UserRepository) *Handler {
+type UserRepository interface {
+	CreateUser(context.Context, model.CreateUserInput) (model.User, error)
+}
+
+func New(users UserRepository) *Handler {
 	return &Handler{users: users}
 }
 
@@ -62,16 +68,14 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 
 	user, err := h.users.CreateUser(r.Context(), input)
 	if err != nil {
-
-		if mysqlErr, ok := err.(*mysql.MySQLError); ok {
-			if mysqlErr.Number == 1062 {
-				response.Error(
-					w,
-					http.StatusConflict,
-					"Username or email already exists",
-				)
-				return
-			}
+		var mysqlErr *mysql.MySQLError
+		if errors.As(err, &mysqlErr) && mysqlErr.Number == 1062 {
+			response.Error(
+				w,
+				http.StatusConflict,
+				"Username or email already exists",
+			)
+			return
 		}
 
 		response.Error(
