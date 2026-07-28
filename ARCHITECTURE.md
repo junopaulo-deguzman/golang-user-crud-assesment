@@ -11,7 +11,7 @@ All endpoints require authentication
 
 #### User Data Structure
 
-- `id`: UUID
+- `id`: auto-increment int
 - `username`
 - `email`
 - `age` 

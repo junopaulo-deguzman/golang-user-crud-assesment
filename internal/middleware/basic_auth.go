@@ -12,5 +12,6 @@ func BasicAuth(username, password string, next http.Handler) http.Handler {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
+		next.ServeHTTP(w, r)
 	})
 }
