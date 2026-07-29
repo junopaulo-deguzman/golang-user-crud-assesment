@@ -19,7 +19,7 @@ func NewUserRepository(db *sql.DB) *UserRepository {
 
 func (r *UserRepository) CreateUser(
 	ctx context.Context,
-	input model.CreateUserInput,
+	input model.UserInput,
 ) (model.User, error) {
 	result, err := r.db.ExecContext(
 		ctx,
@@ -64,4 +64,24 @@ func (r *UserRepository) GetUserByID(
 	}
 
 	return user, nil
+}
+
+func (r *UserRepository) UpdateUserByID(
+	ctx context.Context,
+	id int64,
+	input model.UserInput,
+) (model.User, error) {
+	_, err := r.db.ExecContext(
+		ctx,
+		"UPDATE users SET username = ?, email = ?, age = ? WHERE id = ?",
+		input.Username,
+		input.Email,
+		input.Age,
+		id,
+	)
+	if err != nil {
+		return model.User{}, err
+	}
+
+	return r.GetUserByID(ctx, id)
 }

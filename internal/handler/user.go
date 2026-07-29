@@ -23,8 +23,9 @@ type Handler struct {
 }
 
 type UserRepository interface {
-	CreateUser(context.Context, model.CreateUserInput) (model.User, error)
+	CreateUser(context.Context, model.UserInput) (model.User, error)
 	GetUserByID(context.Context, int64) (model.User, error)
+	UpdateUserByID(context.Context, int64, model.UserInput) (model.User, error)
 }
 
 func New(users UserRepository) *Handler {
@@ -33,7 +34,6 @@ func New(users UserRepository) *Handler {
 
 func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
 	var id string
-	log.Printf("http request: %s %s", r.Method, r.URL.Path)
 	if id = r.PathValue("id"); id == "" {
 		response.Error(
 			w,
@@ -79,7 +79,7 @@ func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
-	var input model.CreateUserInput
+	var input model.UserInput
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 
@@ -102,7 +102,7 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := validateCreateUserInput(input); err != nil {
+	if err := validateUserInput(input); err != nil {
 		response.Error(
 			w,
 			http.StatusBadRequest,
@@ -113,16 +113,15 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 
 	user, err := h.users.CreateUser(r.Context(), input)
 	if err != nil {
-		var mysqlErr *mysql.MySQLError
-		if errors.As(err, &mysqlErr) && mysqlErr.Number == 1062 {
+		status, message, handled := checkSqlDuplicateError(err)
+		if handled {
 			response.Error(
 				w,
-				http.StatusConflict,
-				"Username or email already exists",
+				status,
+				message,
 			)
 			return
 		}
-
 		response.Error(
 			w,
 			http.StatusInternalServerError,
@@ -142,14 +141,99 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
-	// Implement the logic to update an existing user
+	var id string
+	if id = r.PathValue("id"); id == "" {
+		response.Error(
+			w,
+			http.StatusBadRequest,
+			"User ID is required",
+		)
+		return
+	}
+
+	idInt, err := strconv.ParseInt(id, 10, 64)
+	if err != nil || idInt <= 0 {
+		response.Error(
+			w,
+			http.StatusBadRequest,
+			"Invalid user ID",
+		)
+		return
+	}
+
+	var input model.UserInput
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+
+	if err := decoder.Decode(&input); err != nil {
+		response.Error(
+			w,
+			http.StatusBadRequest,
+			"Invalid request payload",
+		)
+		return
+	}
+
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		response.Error(
+			w,
+			http.StatusBadRequest,
+			"Request body must contain only one JSON object",
+		)
+		return
+	}
+
+	if err := validateUserInput(input); err != nil {
+		response.Error(
+			w,
+			http.StatusBadRequest,
+			err.Error(),
+		)
+		return
+	}
+
+	user, err := h.users.UpdateUserByID(r.Context(), idInt, input)
+
+	if err != nil {
+		if errors.Is(err, repository.ErrUserNotFound) {
+			response.Error(
+				w,
+				http.StatusNotFound,
+				"User not found",
+			)
+			return
+		}
+
+		if status, message, handled := checkSqlDuplicateError(err); handled {
+			response.Error(
+				w,
+				status,
+				message,
+			)
+			return
+		}
+
+		response.Error(
+			w,
+			http.StatusInternalServerError,
+			"Failed to update user",
+		)
+		return
+	}
+
+	response.JSON(
+		w,
+		http.StatusOK,
+		user,
+	)
 }
 
 func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	// Implement the logic to delete a user by ID
 }
 
-func validateCreateUserInput(input model.CreateUserInput) error {
+func validateUserInput(input model.UserInput) error {
 	if input.Username == "" {
 		return fmt.Errorf("username is required")
 	}
@@ -176,4 +260,14 @@ func validateEmail(value string) error {
 	}
 
 	return nil
+}
+
+func checkSqlDuplicateError(err error) (status int, message string, handled bool) {
+	var mysqlErr *mysql.MySQLError
+
+	if errors.As(err, &mysqlErr) && mysqlErr.Number == 1062 {
+		return http.StatusConflict, "Username or email already exists", true
+	}
+
+	return 0, "", false
 }

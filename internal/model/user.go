@@ -7,7 +7,7 @@ type User struct {
 	Age      int    `json:"age"`
 }
 
-type CreateUserInput struct {
+type UserInput struct {
 	Username string `json:"username"`
 	Email    string `json:"email"`
 	Age      int    `json:"age"`

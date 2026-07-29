@@ -16,13 +16,14 @@ import (
 )
 
 type stubUserRepository struct {
-	createUser  func(context.Context, model.CreateUserInput) (model.User, error)
-	getUserByID func(context.Context, int64) (model.User, error)
+	createUser     func(context.Context, model.UserInput) (model.User, error)
+	getUserByID    func(context.Context, int64) (model.User, error)
+	updateUserByID func(context.Context, int64, model.UserInput) (model.User, error)
 }
 
 func (s stubUserRepository) CreateUser(
 	ctx context.Context,
-	input model.CreateUserInput,
+	input model.UserInput,
 ) (model.User, error) {
 	return s.createUser(ctx, input)
 }
@@ -34,6 +35,14 @@ func (s stubUserRepository) GetUserByID(
 	return s.getUserByID(ctx, id)
 }
 
+func (s stubUserRepository) UpdateUserByID(
+	ctx context.Context,
+	id int64,
+	input model.UserInput,
+) (model.User, error) {
+	return s.updateUserByID(ctx, id, input)
+}
+
 func TestCreateUserSuccess(t *testing.T) {
 	want := model.User{
 		ID:       42,
@@ -42,7 +51,7 @@ func TestCreateUserSuccess(t *testing.T) {
 		Age:      30,
 	}
 	repository := stubUserRepository{
-		createUser: func(_ context.Context, input model.CreateUserInput) (model.User, error) {
+		createUser: func(_ context.Context, input model.UserInput) (model.User, error) {
 			if input.Username != want.Username || input.Email != want.Email || input.Age != want.Age {
 				t.Fatalf("CreateUser input = %+v", input)
 			}
@@ -132,7 +141,7 @@ func TestCreateUserRejectsInvalidRequests(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			repository := stubUserRepository{
-				createUser: func(context.Context, model.CreateUserInput) (model.User, error) {
+				createUser: func(context.Context, model.UserInput) (model.User, error) {
 					t.Fatal("repository should not be called for an invalid request")
 					return model.User{}, nil
 				},
@@ -155,7 +164,7 @@ func TestCreateUserRepositoryErrors(t *testing.T) {
 		{
 			name: "duplicate user",
 			repository: stubUserRepository{
-				createUser: func(context.Context, model.CreateUserInput) (model.User, error) {
+				createUser: func(context.Context, model.UserInput) (model.User, error) {
 					return model.User{}, &mysql.MySQLError{
 						Number:  1062,
 						Message: "Duplicate entry",
@@ -168,7 +177,7 @@ func TestCreateUserRepositoryErrors(t *testing.T) {
 		{
 			name: "unexpected database error",
 			repository: stubUserRepository{
-				createUser: func(context.Context, model.CreateUserInput) (model.User, error) {
+				createUser: func(context.Context, model.UserInput) (model.User, error) {
 					return model.User{}, errors.New("database unavailable")
 				},
 			},
@@ -263,6 +272,199 @@ func TestGetUserByIDInvalidID(t *testing.T) {
 	}
 }
 
+func TestUpdateUserByIDSuccess(t *testing.T) {
+	repository := stubUserRepository{
+		updateUserByID: func(ctx context.Context, id int64, input model.UserInput) (model.User, error) {
+			return model.User{
+				ID:       id,
+				Username: input.Username,
+				Email:    input.Email,
+				Age:      input.Age,
+			}, nil
+		},
+	}
+
+	response := performUpdateUserRequest(
+		t,
+		repository,
+		"1",
+		`{"username":"juno","email":"juno@example.com","age":30}`,
+	)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body = %s", response.Code, http.StatusOK, response.Body.String())
+	}
+
+	var user model.User
+	if err := json.NewDecoder(response.Body).Decode(&user); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if user.ID != 1 {
+		t.Errorf("user.ID = %d, want %d", user.ID, 1)
+	}
+	if user.Username != "juno" {
+		t.Errorf("user.Username = %q, want %q", user.Username, "juno")
+	}
+	if user.Email != "juno@example.com" {
+		t.Errorf("user.Email = %q, want %q", user.Email, "juno@example.com")
+	}
+	if user.Age != 30 {
+		t.Errorf("user.Age = %d, want %d", user.Age, 30)
+	}
+}
+
+func TestUpdateUserByIDNotFound(t *testing.T) {
+	repository := stubUserRepository{
+		updateUserByID: func(ctx context.Context, id int64, input model.UserInput) (model.User, error) {
+			return model.User{}, repository.ErrUserNotFound
+		},
+	}
+
+	response := performUpdateUserRequest(
+		t,
+		repository,
+		"1",
+		`{"username":"juno","email":"juno@example.com","age":30}`,
+	)
+
+	assertErrorResponse(t, response, http.StatusNotFound, "User not found")
+}
+
+func TestUpdateUserByIDInvalidRequest(t *testing.T) {
+	repository := stubUserRepository{}
+
+	tests := []struct {
+		name       string
+		id         string
+		body       string
+		wantStatus int
+		wantError  string
+	}{
+		{
+			name:       "malformed JSON",
+			id:         "1",
+			body:       `{"username":`,
+			wantStatus: http.StatusBadRequest,
+			wantError:  "Invalid request payload",
+		},
+		{
+			name:       "trailing JSON",
+			id:         "1",
+			body:       `{"username":"juno","email":"juno@example.com", "age":30}{}`,
+			wantStatus: http.StatusBadRequest,
+			wantError:  "Request body must contain only one JSON object",
+		},
+		{
+			name:       "unknown field",
+			id:         "1",
+			body:       `{"username":"juno","email":"juno@example.com","unknown_field":"value"}`,
+			wantStatus: http.StatusBadRequest,
+			wantError:  "Invalid request payload",
+		},
+		{
+			name:       "missing username",
+			id:         "1",
+			body:       `{"email":"juno@example.com","age":30}`,
+			wantStatus: http.StatusBadRequest,
+			wantError:  "username is required",
+		},
+		{
+			name:       "missing email",
+			id:         "1",
+			body:       `{"username":"juno","age":30}`,
+			wantStatus: http.StatusBadRequest,
+			wantError:  "email is required",
+		},
+		{
+			name:       "invalid age",
+			id:         "1",
+			body:       `{"username":"juno","email":"juno@example.com","age":-1}`,
+			wantStatus: http.StatusBadRequest,
+			wantError:  "age must be a positive integer",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			response := performUpdateUserRequest(
+				t,
+				repository,
+				test.id,
+				test.body,
+			)
+
+			assertErrorResponse(t, response, test.wantStatus, test.wantError)
+		})
+	}
+}
+
+func TestUpdateUserByDuplicateRepositoryError(t *testing.T) {
+	repository := stubUserRepository{
+		updateUserByID: func(ctx context.Context, id int64, input model.UserInput) (model.User, error) {
+			return model.User{}, &mysql.MySQLError{
+				Number:  1062,
+				Message: "Duplicate entry",
+			}
+		},
+	}
+
+	response := performUpdateUserRequest(
+		t,
+		repository,
+		"1",
+		`{"username":"juno","email":"juno@example.com","age":30}`,
+	)
+
+	assertErrorResponse(t, response, http.StatusConflict, "Username or email already exists")
+}
+
+func TestUpdateUserByUnexpectedRepositoryError(t *testing.T) {
+	repository := stubUserRepository{
+		updateUserByID: func(ctx context.Context, id int64, input model.UserInput) (model.User, error) {
+			return model.User{}, errors.New("database unavailable")
+		},
+	}
+
+	response := performUpdateUserRequest(
+		t,
+		repository,
+		"1",
+		`{"username":"juno","email":"juno@example.com","age":30}`,
+	)
+
+	assertErrorResponse(t, response, http.StatusInternalServerError, "Failed to update user")
+}
+
+func TestUpdateUserByIDInvalidID(t *testing.T) {
+	repository := stubUserRepository{
+		updateUserByID: func(ctx context.Context, id int64, input model.UserInput) (model.User, error) {
+			t.Fatal("repository should not be called for an invalid ID")
+			return model.User{}, nil
+		},
+	}
+
+	tests := []struct {
+		name string
+		id   string
+	}{
+		{name: "non-numeric ID", id: "abc"},
+		{name: "negative ID", id: "-1"},
+		{name: "zero ID", id: "0"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			response := performUpdateUserRequest(
+				t,
+				repository,
+				test.id,
+				`{"username":"juno","email":"juno@example.com","age":30}`,
+			)
+
+			assertErrorResponse(t, response, http.StatusBadRequest, "Invalid user ID")
+		})
+	}
+}
+
 func TestValidateEmail(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -310,6 +512,22 @@ func performGetUserRequest(
 	request.SetPathValue("id", id)
 	response := httptest.NewRecorder()
 	New(repository).GetUser(response, request)
+
+	return response
+}
+
+func performUpdateUserRequest(
+	t *testing.T,
+	repository UserRepository,
+	id string,
+	body string,
+) *httptest.ResponseRecorder {
+	t.Helper()
+
+	request := httptest.NewRequest(http.MethodPut, "/users/"+id, strings.NewReader(body))
+	request.SetPathValue("id", id)
+	response := httptest.NewRecorder()
+	New(repository).UpdateUser(response, request)
 
 	return response
 }
