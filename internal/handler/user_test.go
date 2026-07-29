@@ -19,6 +19,7 @@ type stubUserRepository struct {
 	createUser     func(context.Context, model.UserInput) (model.User, error)
 	getUserByID    func(context.Context, int64) (model.User, error)
 	updateUserByID func(context.Context, int64, model.UserInput) (model.User, error)
+	deleteUserByID func(context.Context, int64) error
 }
 
 func (s stubUserRepository) CreateUser(
@@ -41,6 +42,13 @@ func (s stubUserRepository) UpdateUserByID(
 	input model.UserInput,
 ) (model.User, error) {
 	return s.updateUserByID(ctx, id, input)
+}
+
+func (s stubUserRepository) DeleteUserByID(
+	ctx context.Context,
+	id int64,
+) error {
+	return s.deleteUserByID(ctx, id)
 }
 
 func TestCreateUserSuccess(t *testing.T) {
@@ -465,6 +473,74 @@ func TestUpdateUserByIDInvalidID(t *testing.T) {
 	}
 }
 
+func TestDeleteUserByIDSuccess(t *testing.T) {
+	repository := stubUserRepository{
+		deleteUserByID: func(ctx context.Context, id int64) error {
+			return nil
+		},
+	}
+
+	response := performDeleteUserRequest(t, repository, "1")
+
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusNoContent)
+	}
+
+	if response.Body.Len() != 0 {
+		t.Errorf("response body = %q, want empty", response.Body.String())
+	}
+}
+
+func TestDeleteUserByIDNotFound(t *testing.T) {
+	repository := stubUserRepository{
+		deleteUserByID: func(ctx context.Context, id int64) error {
+			return repository.ErrUserNotFound
+		},
+	}
+
+	response := performDeleteUserRequest(t, repository, "1")
+
+	assertErrorResponse(t, response, http.StatusNotFound, "User not found")
+}
+
+func TestDeleteUserByIDInvalidID(t *testing.T) {
+	repository := stubUserRepository{
+		deleteUserByID: func(ctx context.Context, id int64) error {
+			t.Fatal("repository should not be called for an invalid ID")
+			return nil
+		},
+	}
+
+	tests := []struct {
+		name string
+		id   string
+	}{
+		{name: "non-numeric ID", id: "abc"},
+		{name: "negative ID", id: "-1"},
+		{name: "zero ID", id: "0"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			response := performDeleteUserRequest(t, repository, test.id)
+
+			assertErrorResponse(t, response, http.StatusBadRequest, "Invalid user ID")
+		})
+	}
+}
+
+func TestDeleteUserByUnexpectedRepositoryError(t *testing.T) {
+	repository := stubUserRepository{
+		deleteUserByID: func(ctx context.Context, id int64) error {
+			return errors.New("database unavailable")
+		},
+	}
+
+	response := performDeleteUserRequest(t, repository, "1")
+
+	assertErrorResponse(t, response, http.StatusInternalServerError, "Failed to delete user")
+}
+
 func TestValidateEmail(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -528,6 +604,21 @@ func performUpdateUserRequest(
 	request.SetPathValue("id", id)
 	response := httptest.NewRecorder()
 	New(repository).UpdateUser(response, request)
+
+	return response
+}
+
+func performDeleteUserRequest(
+	t *testing.T,
+	repository UserRepository,
+	id string,
+) *httptest.ResponseRecorder {
+	t.Helper()
+
+	request := httptest.NewRequest(http.MethodDelete, "/users/"+id, nil)
+	request.SetPathValue("id", id)
+	response := httptest.NewRecorder()
+	New(repository).DeleteUser(response, request)
 
 	return response
 }

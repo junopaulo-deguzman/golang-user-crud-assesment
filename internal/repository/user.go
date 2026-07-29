@@ -85,3 +85,28 @@ func (r *UserRepository) UpdateUserByID(
 
 	return r.GetUserByID(ctx, id)
 }
+
+func (r *UserRepository) DeleteUserByID(
+	ctx context.Context,
+	id int64,
+) error {
+	result, err := r.db.ExecContext(
+		ctx,
+		"DELETE FROM users WHERE id = ?",
+		id,
+	)
+	if err != nil {
+		return err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if rowsAffected == 0 {
+		return ErrUserNotFound
+	}
+
+	return nil
+}

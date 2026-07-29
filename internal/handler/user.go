@@ -26,6 +26,7 @@ type UserRepository interface {
 	CreateUser(context.Context, model.UserInput) (model.User, error)
 	GetUserByID(context.Context, int64) (model.User, error)
 	UpdateUserByID(context.Context, int64, model.UserInput) (model.User, error)
+	DeleteUserByID(context.Context, int64) error
 }
 
 func New(users UserRepository) *Handler {
@@ -230,7 +231,45 @@ func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
-	// Implement the logic to delete a user by ID
+	var id string
+	if id = r.PathValue("id"); id == "" {
+		response.Error(
+			w,
+			http.StatusBadRequest,
+			"User ID is required",
+		)
+		return
+	}
+
+	idInt, err := strconv.ParseInt(id, 10, 64)
+	if err != nil || idInt <= 0 {
+		response.Error(
+			w,
+			http.StatusBadRequest,
+			"Invalid user ID",
+		)
+		return
+	}
+
+	err = h.users.DeleteUserByID(r.Context(), idInt)
+	if err != nil {
+		if errors.Is(err, repository.ErrUserNotFound) {
+			response.Error(
+				w,
+				http.StatusNotFound,
+				"User not found",
+			)
+			return
+		}
+		response.Error(
+			w,
+			http.StatusInternalServerError,
+			"Failed to delete user",
+		)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func validateUserInput(input model.UserInput) error {
