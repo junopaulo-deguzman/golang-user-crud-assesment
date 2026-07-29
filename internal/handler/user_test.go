@@ -10,12 +10,14 @@ import (
 	"testing"
 
 	"golang-user-crud-assesment/internal/model"
+	"golang-user-crud-assesment/internal/repository"
 
 	"github.com/go-sql-driver/mysql"
 )
 
 type stubUserRepository struct {
-	createUser func(context.Context, model.CreateUserInput) (model.User, error)
+	createUser  func(context.Context, model.CreateUserInput) (model.User, error)
+	getUserByID func(context.Context, int64) (model.User, error)
 }
 
 func (s stubUserRepository) CreateUser(
@@ -23,6 +25,13 @@ func (s stubUserRepository) CreateUser(
 	input model.CreateUserInput,
 ) (model.User, error) {
 	return s.createUser(ctx, input)
+}
+
+func (s stubUserRepository) GetUserByID(
+	ctx context.Context,
+	id int64,
+) (model.User, error) {
+	return s.getUserByID(ctx, id)
 }
 
 func TestCreateUserSuccess(t *testing.T) {
@@ -181,6 +190,79 @@ func TestCreateUserRepositoryErrors(t *testing.T) {
 	}
 }
 
+func TestGetUserByIDSuccess(t *testing.T) {
+	repository := stubUserRepository{
+		getUserByID: func(ctx context.Context, id int64) (model.User, error) {
+			return model.User{
+				ID:       id,
+				Username: "juno",
+				Email:    "juno@example.com",
+				Age:      30,
+			}, nil
+		},
+	}
+
+	response := performGetUserRequest(t, repository, "1")
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body = %s", response.Code, http.StatusOK, response.Body.String())
+	}
+
+	var user model.User
+	if err := json.NewDecoder(response.Body).Decode(&user); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if user.ID != 1 {
+		t.Errorf("user.ID = %d, want %d", user.ID, 1)
+	}
+	if user.Username != "juno" {
+		t.Errorf("user.Username = %q, want %q", user.Username, "juno")
+	}
+	if user.Email != "juno@example.com" {
+		t.Errorf("user.Email = %q, want %q", user.Email, "juno@example.com")
+	}
+	if user.Age != 30 {
+		t.Errorf("user.Age = %d, want %d", user.Age, 30)
+	}
+}
+
+func TestGetUserByIDNotFound(t *testing.T) {
+	repository := stubUserRepository{
+		getUserByID: func(ctx context.Context, id int64) (model.User, error) {
+			return model.User{}, repository.ErrUserNotFound
+		},
+	}
+
+	response := performGetUserRequest(t, repository, "1")
+
+	assertErrorResponse(t, response, http.StatusNotFound, "User not found")
+}
+
+func TestGetUserByIDInvalidID(t *testing.T) {
+	repository := stubUserRepository{
+		getUserByID: func(ctx context.Context, id int64) (model.User, error) {
+			t.Fatal("repository should not be called for an invalid ID")
+			return model.User{}, nil
+		},
+	}
+
+	tests := []struct {
+		name string
+		id   string
+	}{
+		{name: "non-numeric ID", id: "abc"},
+		{name: "negative ID", id: "-1"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			response := performGetUserRequest(t, repository, test.id)
+
+			assertErrorResponse(t, response, http.StatusBadRequest, "Invalid user ID")
+		})
+	}
+}
+
 func TestValidateEmail(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -213,6 +295,21 @@ func performCreateUserRequest(
 	request := httptest.NewRequest(http.MethodPost, "/users", strings.NewReader(body))
 	response := httptest.NewRecorder()
 	New(repository).CreateUser(response, request)
+
+	return response
+}
+
+func performGetUserRequest(
+	t *testing.T,
+	repository UserRepository,
+	id string,
+) *httptest.ResponseRecorder {
+	t.Helper()
+
+	request := httptest.NewRequest(http.MethodGet, "/users/"+id, nil)
+	request.SetPathValue("id", id)
+	response := httptest.NewRecorder()
+	New(repository).GetUser(response, request)
 
 	return response
 }

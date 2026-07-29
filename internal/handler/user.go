@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"golang-user-crud-assesment/internal/repository"
 	"io"
 	"log"
 	"net/http"
 	"net/mail"
+	"strconv"
 
 	"golang-user-crud-assesment/internal/model"
 	"golang-user-crud-assesment/internal/response"
@@ -22,6 +24,7 @@ type Handler struct {
 
 type UserRepository interface {
 	CreateUser(context.Context, model.CreateUserInput) (model.User, error)
+	GetUserByID(context.Context, int64) (model.User, error)
 }
 
 func New(users UserRepository) *Handler {
@@ -29,11 +32,53 @@ func New(users UserRepository) *Handler {
 }
 
 func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
+	var id string
+	log.Printf("http request: %s %s", r.Method, r.URL.Path)
+	if id = r.PathValue("id"); id == "" {
+		response.Error(
+			w,
+			http.StatusBadRequest,
+			"User ID is required",
+		)
+		return
+	}
 
+	idInt, err := strconv.ParseInt(id, 10, 64)
+	if err != nil || idInt <= 0 {
+		response.Error(
+			w,
+			http.StatusBadRequest,
+			"Invalid user ID",
+		)
+		return
+	}
+
+	user, err := h.users.GetUserByID(r.Context(), idInt)
+	if err != nil {
+		if errors.Is(err, repository.ErrUserNotFound) {
+			response.Error(
+				w,
+				http.StatusNotFound,
+				"User not found",
+			)
+			return
+		}
+		response.Error(
+			w,
+			http.StatusInternalServerError,
+			"Failed to get user",
+		)
+		return
+	}
+
+	response.JSON(
+		w,
+		http.StatusOK,
+		user,
+	)
 }
 
 func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
-	// Implement the logic to create a new user
 	var input model.CreateUserInput
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()

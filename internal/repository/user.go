@@ -3,8 +3,11 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"golang-user-crud-assesment/internal/model"
 )
+
+var ErrUserNotFound = errors.New("user not found")
 
 type UserRepository struct {
 	db *sql.DB
@@ -40,4 +43,25 @@ func (r *UserRepository) CreateUser(
 		Email:    input.Email,
 		Age:      input.Age,
 	}, nil
+}
+
+func (r *UserRepository) GetUserByID(
+	ctx context.Context,
+	id int64,
+) (model.User, error) {
+	var user model.User
+	err := r.db.QueryRowContext(
+		ctx,
+		"SELECT id, username, email, age FROM users WHERE id = ?",
+		id,
+	).Scan(&user.ID, &user.Username, &user.Email, &user.Age)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return model.User{}, ErrUserNotFound
+		}
+		return model.User{}, err
+	}
+
+	return user, nil
 }
