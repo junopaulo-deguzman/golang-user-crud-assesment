@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"golang-user-crud-assesment/internal/handler"
 	"golang-user-crud-assesment/internal/middleware"
 	"golang-user-crud-assesment/internal/repository"
@@ -55,7 +54,6 @@ func main() {
 	mux := http.NewServeMux()
 	h := handler.New(repository.NewUserRepository(db))
 
-	mux.HandleFunc("GET /health", health)
 	mux.Handle(
 		"POST /users",
 		middleware.BasicAuth(username, password, http.HandlerFunc(h.CreateUser)),
@@ -76,18 +74,5 @@ func main() {
 	log.Printf("Server has started on :8080")
 	if err := http.ListenAndServe(":8080", mux); err != nil {
 		log.Fatal(err)
-	}
-}
-
-func health(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-}
-
-func writeJSON(w http.ResponseWriter, status int, value any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-
-	if err := json.NewEncoder(w).Encode(value); err != nil {
-		log.Printf("failed to write json response: %v", err)
 	}
 }

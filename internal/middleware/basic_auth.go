@@ -2,6 +2,8 @@ package middleware
 
 import (
 	"net/http"
+
+	"golang-user-crud-assesment/internal/response"
 )
 
 func BasicAuth(username, password string, next http.Handler) http.Handler {
@@ -9,7 +11,7 @@ func BasicAuth(username, password string, next http.Handler) http.Handler {
 		providedUsername, providedPassword, ok := r.BasicAuth()
 		if !ok || providedUsername != username || providedPassword != password {
 			w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			response.Error(w, http.StatusUnauthorized, "Unauthorized")
 			return
 		}
 		next.ServeHTTP(w, r)
