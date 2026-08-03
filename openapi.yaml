@@ -24,8 +24,8 @@ paths:
             schema:
               $ref: '#/components/schemas/UserInput'
             example:
-              username: juno
-              email: juno@example.com
+              username: user
+              email: user@example.com
               age: 30
       responses:
         '201':
@@ -36,8 +36,8 @@ paths:
                 $ref: '#/components/schemas/User'
               example:
                 id: 1
-                username: juno
-                email: juno@example.com
+                username: user
+                email: user@example.com
                 age: 30
         '400':
           $ref: '#/components/responses/BadRequest'
@@ -63,8 +63,8 @@ paths:
                 $ref: '#/components/schemas/User'
               example:
                 id: 1
-                username: juno
-                email: juno@example.com
+                username: user
+                email: user@example.com
                 age: 30
         '400':
           $ref: '#/components/responses/BadRequest'
@@ -85,8 +85,8 @@ paths:
             schema:
               $ref: '#/components/schemas/UserInput'
             example:
-              username: juno-updated
-              email: juno.updated@example.com
+              username: user-updated
+              email: user.updated@example.com
               age: 31
       responses:
         '200':
@@ -97,9 +97,43 @@ paths:
                 $ref: '#/components/schemas/User'
               example:
                 id: 1
-                username: juno-updated
-                email: juno.updated@example.com
+                username: user-updated
+                email: user.updated@example.com
                 age: 31
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    patch:
+      summary: Partially update a user by ID
+      operationId: patchUserByID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserPatch'
+            example:
+              age: 32
+      responses:
+        '200':
+          description: User patched successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+              example:
+                id: 1
+                username: user-patched
+                email: user.patched@example.com
+                age: 32
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -156,12 +190,14 @@ components:
       properties:
         username:
           type: string
-          minLength: 1
-          example: juno
+          minLength: 3
+          maxLength: 100
+          example: user
         email:
           type: string
           format: email
-          example: juno@example.com
+          maxLength: 254
+          example: user@example.com
         age:
           type: integer
           minimum: 1
@@ -183,15 +219,36 @@ components:
           example: 1
         username:
           type: string
-          example: juno
+          example: user
         email:
           type: string
           format: email
-          example: juno@example.com
+          example: user@example.com
         age:
           type: integer
           minimum: 1
           example: 30
+
+    UserPatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      description: At least one property is required. Omitted properties remain unchanged.
+      properties:
+        username:
+          type: string
+          minLength: 3
+          maxLength: 100
+          example: user-patched
+        email:
+          type: string
+          format: email
+          maxLength: 254
+          example: user.patched@example.com
+        age:
+          type: integer
+          minimum: 1
+          example: 32
 
     Error:
       type: object

@@ -41,15 +41,6 @@ Every registered route passes through Basic Authentication before reaching a use
 
 The handler depends on a small `UserRepository` interface rather than directly on MySQL. This keeps HTTP behavior isolated and allows handler tests to use an in-memory stub.
 
-## HTTP API
-
-| Method | Route | Success | Expected errors |
-| --- | --- | --- | --- |
-| `POST` | `/users` | `201 Created` | `400`, `401`, `409`, `500` |
-| `GET` | `/users/{id}` | `200 OK` | `400`, `401`, `404`, `500` |
-| `PUT` | `/users/{id}` | `200 OK` | `400`, `401`, `404`, `409`, `500` |
-| `DELETE` | `/users/{id}` | `204 No Content` | `400`, `401`, `404`, `500` |
-
 ## Authentication
 
 Basic Authentication is applied to every `/users` operation. The server reads credentials from `BASIC_AUTH_USERNAME` and `BASIC_AUTH_PASSWORD`. Missing or incorrect credentials produce `401 Unauthorized`, a `WWW-Authenticate` header, and a JSON error body.
@@ -58,13 +49,11 @@ Authentication only verifies access to the API. Role-based access control is out
 
 ## Validation
 
-Create and update requests require exactly one JSON object containing:
+Handlers validate request data before calling the repository. The shared JSON decoder rejects malformed bodies, unknown fields, and trailing JSON values. Path IDs must be positive integers.
 
-- `username`: required and non-empty
-- `email`: required and formatted as a plain email address
-- `age`: a positive integer
+POST and PUT decode into `UserInput`, so all user fields are required. PATCH decodes into `UserPatch`, whose pointer fields distinguish a supplied value from an omitted field. At least one non-nil patch field is required, and only supplied fields are validated.
 
-Unknown fields, malformed JSON, trailing JSON values, and invalid user IDs are rejected with `400 Bad Request`.
+An explicit JSON `null` also decodes to a nil pointer, so it is currently treated like an omitted field. A request containing only null user fields is rejected as an empty patch. The exact input constraints are defined in `openapi.yaml`.
 
 ## Persistence
 
@@ -77,6 +66,22 @@ The server configures the shared `sql.DB` pool with:
 - 5-minute maximum connection lifetime
 
 Database connectivity is verified during startup with a five-second timeout. Startup stops immediately if configuration is missing or MySQL cannot be reached.
+
+### Partial updates
+
+The PATCH repository uses `COALESCE` to update only supplied values:
+
+```sql
+UPDATE users
+SET username = COALESCE(?, username),
+    email = COALESCE(?, email),
+    age = COALESCE(?, age)
+WHERE id = ?
+```
+
+For an omitted patch field, Go passes a nil pointer through the database driver as SQL `NULL`. `COALESCE(NULL, column)` returns the existing column value. For a supplied field, the first argument is non-null, so `COALESCE(value, column)` returns the new value.
+
+For example, an age-only patch sends SQL arguments equivalent to `NULL, NULL, 35, id`. Username and email keep their existing values while age becomes 35. The repository then retrieves and returns the complete updated user.
 
 ## Error handling
 
@@ -92,4 +97,4 @@ Repository errors are translated at the handler boundary. Missing rows become `4
 
 ## API contract and testing
 
-`openapi.yaml` defines the Basic Auth scheme, operations, inputs, output schemas, examples, and error responses. Handler tests cover successful requests, validation failures, missing users, duplicate users, and unexpected repository errors. Middleware tests cover valid, missing, and invalid credentials.
+`openapi.yaml` is the authoritative HTTP contract and defines the Basic Auth scheme, operations, inputs, output schemas, examples, and error responses. Handler tests cover successful requests, validation failures, missing users, duplicate users, and unexpected repository errors. Middleware tests cover valid, missing, and invalid credentials.

@@ -49,9 +49,10 @@ A small REST API written in Go for creating, retrieving, updating, and deleting 
 | `POST` | `/users` | Create a user | `201 Created` |
 | `GET` | `/users/{id}` | Retrieve a user | `200 OK` |
 | `PUT` | `/users/{id}` | Replace a user's details | `200 OK` |
+| `PATCH` | `/users/{id}` | Partially update a user | `200 OK` |
 | `DELETE` | `/users/{id}` | Delete a user | `204 No Content` |
 
-User input must contain a non-empty `username`, a valid `email`, and an `age` greater than zero. Unknown JSON fields are rejected. Usernames and email addresses must be unique.
+POST and PUT require complete user details. PATCH accepts at least one supported field and leaves omitted fields unchanged. Usernames and email addresses must be unique. See [`openapi.yaml`](openapi.yaml) for the complete request validation and response contract.
 
 ## Test with curl
 
@@ -63,7 +64,7 @@ Run these commands from a shell where the `.env` file has been loaded. Replace u
 curl -i \
   -u "${BASIC_AUTH_USERNAME}:${BASIC_AUTH_PASSWORD}" \
   -H "Content-Type: application/json" \
-  -d '{"username":"juno","email":"juno@example.com","age":30}' \
+  -d '{"username":"user","email":"user@example.com","age":30}' \
   http://localhost:8080/users
 ```
 
@@ -75,14 +76,25 @@ curl -i \
   http://localhost:8080/users/1
 ```
 
-### Update a user
+### Replace a user
 
 ```bash
 curl -i \
   -X PUT \
   -u "${BASIC_AUTH_USERNAME}:${BASIC_AUTH_PASSWORD}" \
   -H "Content-Type: application/json" \
-  -d '{"username":"juno-updated","email":"juno.updated@example.com","age":31}' \
+  -d '{"username":"user-updated","email":"user.updated@example.com","age":31}' \
+  http://localhost:8080/users/1
+```
+
+### Patch a user
+
+```bash
+curl -i \
+  -X PATCH \
+  -u "${BASIC_AUTH_USERNAME}:${BASIC_AUTH_PASSWORD}" \
+  -H "Content-Type: application/json" \
+  -d '{"age":35}' \
   http://localhost:8080/users/1
 ```
 
