@@ -66,6 +66,12 @@ func main() {
 		"PUT /users/{id}",
 		middleware.BasicAuth(username, password, http.HandlerFunc(h.UpdateUser)),
 	)
+
+	mux.Handle(
+		"PATCH /users/{id}",
+		middleware.BasicAuth(username, password, http.HandlerFunc(h.PatchUser)),
+	)
+
 	mux.Handle(
 		"DELETE /users/{id}",
 		middleware.BasicAuth(username, password, http.HandlerFunc(h.DeleteUser)),

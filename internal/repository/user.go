@@ -86,6 +86,26 @@ func (r *UserRepository) UpdateUserByID(
 	return r.GetUserByID(ctx, id)
 }
 
+func (r *UserRepository) PatchUserByID(
+	ctx context.Context,
+	id int64,
+	input model.UserPatch,
+) (model.User, error) {
+	_, err := r.db.ExecContext(
+		ctx,
+		"UPDATE users SET username = COALESCE(?, username), email = COALESCE(?, email), age = COALESCE(?, age) WHERE id = ?",
+		input.Username,
+		input.Email,
+		input.Age,
+		id,
+	)
+
+	if err != nil {
+		return model.User{}, err
+	}
+	return r.GetUserByID(ctx, id)
+}
+
 func (r *UserRepository) DeleteUserByID(
 	ctx context.Context,
 	id int64,

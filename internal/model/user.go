@@ -12,3 +12,9 @@ type UserInput struct {
 	Email    string `json:"email"`
 	Age      int    `json:"age"`
 }
+
+type UserPatch struct {
+	Username *string `json:"username"`
+	Email    *string `json:"email"`
+	Age      *int    `json:"age"`
+}

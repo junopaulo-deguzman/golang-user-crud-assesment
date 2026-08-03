@@ -28,6 +28,7 @@ type UserRepository interface {
 	GetUserByID(context.Context, int64) (model.User, error)
 	UpdateUserByID(context.Context, int64, model.UserInput) (model.User, error)
 	DeleteUserByID(context.Context, int64) error
+	PatchUserByID(context.Context, int64, model.UserPatch) (model.User, error)
 }
 
 func New(users UserRepository) *Handler {
@@ -82,24 +83,11 @@ func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	var input model.UserInput
-	decoder := json.NewDecoder(r.Body)
-	decoder.DisallowUnknownFields()
-
-	if err := decoder.Decode(&input); err != nil {
+	if err := decodeJSONBody(r, &input); err != nil {
 		response.Error(
 			w,
 			http.StatusBadRequest,
-			"Invalid request payload",
-		)
-		return
-	}
-
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		response.Error(
-			w,
-			http.StatusBadRequest,
-			"Request body must contain only one JSON object",
+			err.Error(),
 		)
 		return
 	}
@@ -164,24 +152,11 @@ func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var input model.UserInput
-	decoder := json.NewDecoder(r.Body)
-	decoder.DisallowUnknownFields()
-
-	if err := decoder.Decode(&input); err != nil {
+	if err := decodeJSONBody(r, &input); err != nil {
 		response.Error(
 			w,
 			http.StatusBadRequest,
-			"Invalid request payload",
-		)
-		return
-	}
-
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		response.Error(
-			w,
-			http.StatusBadRequest,
-			"Request body must contain only one JSON object",
+			err.Error(),
 		)
 		return
 	}
@@ -196,6 +171,82 @@ func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	user, err := h.users.UpdateUserByID(r.Context(), idInt, input)
+
+	if err != nil {
+		if errors.Is(err, repository.ErrUserNotFound) {
+			response.Error(
+				w,
+				http.StatusNotFound,
+				"User not found",
+			)
+			return
+		}
+
+		if status, message, handled := checkSqlDuplicateError(err); handled {
+			response.Error(
+				w,
+				status,
+				message,
+			)
+			return
+		}
+
+		response.Error(
+			w,
+			http.StatusInternalServerError,
+			"Failed to update user",
+		)
+		return
+	}
+
+	response.JSON(
+		w,
+		http.StatusOK,
+		user,
+	)
+}
+
+func (h *Handler) PatchUser(w http.ResponseWriter, r *http.Request) {
+	var id string
+	if id = r.PathValue("id"); id == "" {
+		response.Error(
+			w,
+			http.StatusBadRequest,
+			"User ID is required",
+		)
+		return
+	}
+
+	idInt, err := strconv.ParseInt(id, 10, 64)
+	if err != nil || idInt <= 0 {
+		response.Error(
+			w,
+			http.StatusBadRequest,
+			"Invalid user ID",
+		)
+		return
+	}
+
+	var input model.UserPatch
+	if err := decodeJSONBody(r, &input); err != nil {
+		response.Error(
+			w,
+			http.StatusBadRequest,
+			err.Error(),
+		)
+		return
+	}
+
+	if err := validateUserPatch(input); err != nil {
+		response.Error(
+			w,
+			http.StatusBadRequest,
+			err.Error(),
+		)
+		return
+	}
+
+	user, err := h.users.PatchUserByID(r.Context(), idInt, input)
 
 	if err != nil {
 		if errors.Is(err, repository.ErrUserNotFound) {
@@ -273,6 +324,22 @@ func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func decodeJSONBody(r *http.Request, destination any) error {
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+
+	if err := decoder.Decode(destination); err != nil {
+		return fmt.Errorf("Invalid request payload")
+	}
+
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return fmt.Errorf("Request body must contain only one JSON object")
+	}
+
+	return nil
+}
+
 func validateUserInput(input model.UserInput) error {
 	if err := validateUsername(input.Username); err != nil {
 		return err
@@ -286,6 +353,31 @@ func validateUserInput(input model.UserInput) error {
 	if input.Age <= 0 {
 		return fmt.Errorf("age must be a positive integer")
 	}
+	return nil
+}
+
+func validateUserPatch(input model.UserPatch) error {
+
+	if input.Username == nil && input.Email == nil && input.Age == nil {
+		return fmt.Errorf("at least one field (username, email, age) must be provided for patching")
+	}
+
+	if input.Username != nil {
+		if err := validateUsername(*input.Username); err != nil {
+			return err
+		}
+	}
+	if input.Email != nil {
+		if err := validateEmail(*input.Email); err != nil {
+			return err
+		}
+	}
+	if input.Age != nil {
+		if *input.Age <= 0 {
+			return fmt.Errorf("age must be a positive integer")
+		}
+	}
+
 	return nil
 }
 

@@ -19,6 +19,7 @@ type stubUserRepository struct {
 	createUser     func(context.Context, model.UserInput) (model.User, error)
 	getUserByID    func(context.Context, int64) (model.User, error)
 	updateUserByID func(context.Context, int64, model.UserInput) (model.User, error)
+	patchUserByID  func(context.Context, int64, model.UserPatch) (model.User, error)
 	deleteUserByID func(context.Context, int64) error
 }
 
@@ -42,6 +43,14 @@ func (s stubUserRepository) UpdateUserByID(
 	input model.UserInput,
 ) (model.User, error) {
 	return s.updateUserByID(ctx, id, input)
+}
+
+func (s stubUserRepository) PatchUserByID(
+	ctx context.Context,
+	id int64,
+	input model.UserPatch,
+) (model.User, error) {
+	return s.patchUserByID(ctx, id, input)
 }
 
 func (s stubUserRepository) DeleteUserByID(
@@ -497,6 +506,122 @@ func TestUpdateUserByIDInvalidID(t *testing.T) {
 	}
 }
 
+func TestPatchUserByIDSuccess(t *testing.T) {
+	repository := stubUserRepository{
+		patchUserByID: func(ctx context.Context, id int64, input model.UserPatch) (model.User, error) {
+			user := model.User{
+				ID:       id,
+				Username: "existing_username",
+				Email:    "existing_email@example.com",
+				Age:      30,
+			}
+
+			if input.Username != nil {
+				user.Username = *input.Username
+			}
+			if input.Email != nil {
+				user.Email = *input.Email
+			}
+			if input.Age != nil {
+				user.Age = *input.Age
+			}
+
+			return user, nil
+		},
+	}
+
+	tests := []struct {
+		name string
+		id   string
+		body string
+		want model.User
+	}{
+		{name: "patch username", id: "1", body: `{"username":"newname"}`, want: model.User{ID: 1, Username: "newname", Email: "existing_email@example.com", Age: 30}},
+		{name: "patch email", id: "1", body: `{"email":"newemail@example.com"}`, want: model.User{ID: 1, Username: "existing_username", Email: "newemail@example.com", Age: 30}},
+		{name: "patch age", id: "1", body: `{"age":35}`, want: model.User{ID: 1, Username: "existing_username", Email: "existing_email@example.com", Age: 35}},
+		{name: "patch all fields", id: "1", body: `{"username":"newname","email":"newemail@example.com","age":35}`, want: model.User{ID: 1, Username: "newname", Email: "newemail@example.com", Age: 35}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			response := performPatchUserRequest(
+				t,
+				repository,
+				test.id,
+				test.body,
+			)
+
+			if response.Code != http.StatusOK {
+				t.Fatalf("status = %d, want %d, body = %s", response.Code, http.StatusOK, response.Body.String())
+			}
+
+			if !strings.Contains(response.Body.String(), `"id":1`) {
+				t.Errorf("response body = %q, want it to contain user ID", response.Body.String())
+			}
+
+			if !strings.Contains(response.Body.String(), `"username":`) {
+				t.Errorf("response body = %q, want it to contain username", response.Body.String())
+			}
+			if !strings.Contains(response.Body.String(), `"email":`) {
+				t.Errorf("response body = %q, want it to contain email", response.Body.String())
+			}
+			if !strings.Contains(response.Body.String(), `"age":`) {
+				t.Errorf("response body = %q, want it to contain age", response.Body.String())
+			}
+
+		})
+	}
+}
+
+func TestPatchUserByIDEmptyPatch(t *testing.T) {
+	repository := stubUserRepository{
+		patchUserByID: func(ctx context.Context, id int64, input model.UserPatch) (model.User, error) {
+			t.Fatal("repository should not be called for an empty patch")
+			return model.User{}, nil
+		},
+	}
+	response := performPatchUserRequest(
+		t,
+		repository,
+		"1",
+		`{}`,
+	)
+
+	assertErrorResponse(t, response, http.StatusBadRequest, "at least one field (username, email, age) must be provided for patching")
+}
+
+func TestPatchUserByIDInvalidRequest(t *testing.T) {
+	repository := stubUserRepository{}
+
+	tests := []struct {
+		name       string
+		id         string
+		body       string
+		wantStatus int
+		wantError  string
+	}{
+		{name: "invalid JSON", id: "1", body: `{"username":`, wantStatus: http.StatusBadRequest, wantError: "Invalid request payload"},
+		{name: "trailing JSON", id: "1", body: `{"username":"newname"}{}`, wantStatus: http.StatusBadRequest, wantError: "Request body must contain only one JSON object"},
+		{name: "unknown field", id: "1", body: `{"unknown":"value"}`, wantStatus: http.StatusBadRequest, wantError: "Invalid request payload"},
+		{name: "invalid age", id: "1", body: `{"age":-1}`, wantStatus: http.StatusBadRequest, wantError: "age must be a positive integer"},
+		{name: "invalid email", id: "1", body: `{"email":"not-an-email"}`, wantStatus: http.StatusBadRequest, wantError: "invalid email format"},
+		{name: "invalid username", id: "1", body: `{"username":"ab"}`, wantStatus: http.StatusBadRequest, wantError: "username must be between 3 and 100 characters"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			response := performPatchUserRequest(
+				t,
+				repository,
+				test.id,
+				test.body,
+			)
+
+			assertErrorResponse(t, response, test.wantStatus, test.wantError)
+		})
+	}
+}
+
 func TestDeleteUserByIDSuccess(t *testing.T) {
 	repository := stubUserRepository{
 		deleteUserByID: func(ctx context.Context, id int64) error {
@@ -643,6 +768,22 @@ func performDeleteUserRequest(
 	request.SetPathValue("id", id)
 	response := httptest.NewRecorder()
 	New(repository).DeleteUser(response, request)
+
+	return response
+}
+
+func performPatchUserRequest(
+	t *testing.T,
+	repository UserRepository,
+	id string,
+	body string,
+) *httptest.ResponseRecorder {
+	t.Helper()
+
+	request := httptest.NewRequest(http.MethodPatch, "/users/"+id, strings.NewReader(body))
+	request.SetPathValue("id", id)
+	response := httptest.NewRecorder()
+	New(repository).PatchUser(response, request)
 
 	return response
 }
