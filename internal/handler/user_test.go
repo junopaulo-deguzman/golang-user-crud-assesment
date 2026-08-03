@@ -121,6 +121,18 @@ func TestCreateUserRejectsInvalidRequests(t *testing.T) {
 			wantError:  "username is required",
 		},
 		{
+			name:       "spaces-only username",
+			body:       `{"username":"   ","email":"juno@example.com","age":30}`,
+			wantStatus: http.StatusBadRequest,
+			wantError:  "username is required",
+		},
+		{
+			name:       "username exceeding 100 characters",
+			body:       `{"username":"` + strings.Repeat("a", 101) + `","email":"juno@example.com","age":30}`,
+			wantStatus: http.StatusBadRequest,
+			wantError:  "username must be between 3 and 100 characters",
+		},
+		{
 			name:       "missing email",
 			body:       `{"username":"juno","age":30}`,
 			wantStatus: http.StatusBadRequest,
@@ -131,6 +143,18 @@ func TestCreateUserRejectsInvalidRequests(t *testing.T) {
 			body:       `{"username":"juno","email":"not-an-email","age":30}`,
 			wantStatus: http.StatusBadRequest,
 			wantError:  "invalid email format",
+		},
+		{
+			name:       "email with surrounding whitespace",
+			body:       `{"username":"juno","email":" juno@example.com ","age":30}`,
+			wantStatus: http.StatusBadRequest,
+			wantError:  "invalid email format",
+		},
+		{
+			name:       "email exceeding 254 characters",
+			body:       `{"username":"juno","email":"` + strings.Repeat("a", 245) + `@example.com","age":30}`,
+			wantStatus: http.StatusBadRequest,
+			wantError:  "email must not exceed 254 characters",
 		},
 		{
 			name:       "display-name email",

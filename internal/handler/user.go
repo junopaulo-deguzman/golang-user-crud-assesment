@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/mail"
 	"strconv"
+	"strings"
 
 	"golang-user-crud-assesment/internal/model"
 	"golang-user-crud-assesment/internal/response"
@@ -273,8 +274,8 @@ func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func validateUserInput(input model.UserInput) error {
-	if input.Username == "" {
-		return fmt.Errorf("username is required")
+	if err := validateUsername(input.Username); err != nil {
+		return err
 	}
 	if input.Email == "" {
 		return fmt.Errorf("email is required")
@@ -296,6 +297,24 @@ func validateEmail(value string) error {
 
 	if address.Address != value {
 		return fmt.Errorf("invalid email format")
+	}
+
+	if len(value) > 254 {
+		return fmt.Errorf("email must not exceed 254 characters")
+	}
+
+	return nil
+}
+
+func validateUsername(value string) error {
+	trimmedValue := strings.TrimSpace(value)
+
+	if len(trimmedValue) == 0 {
+		return fmt.Errorf("username is required")
+	}
+
+	if len(trimmedValue) < 3 || len(trimmedValue) > 100 {
+		return fmt.Errorf("username must be between 3 and 100 characters")
 	}
 
 	return nil
